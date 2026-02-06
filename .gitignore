@@ -1,0 +1,5 @@
+.aitutor/
+.DS_Store
+.vscode/
+__pycache__
+.log
