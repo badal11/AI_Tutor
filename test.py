@@ -122,6 +122,13 @@ class AITutorApp:
             history.append({"role": "assistant", "content": response})
             self.console.print(Panel(Markdown(response), title="Explanation", border_style="magenta"))
 
+    def run_explainer_mode(self):
+        """Standalone Explainer Feature."""
+        self.show_header("CONCEPT EXPLAINER")
+        topic = self.console.input("[bold magenta]What concept or topic should I explain? [/bold magenta]")
+        if topic.strip():
+            self.enter_explainer_mode(topic)
+
     def run_quiz_mode(self):
         self.show_header("PRACTICE QUIZ GENERATOR")
         topic = self.console.input("[bold yellow]What topic do you want to practice? [/bold yellow]")
@@ -204,7 +211,7 @@ class AITutorApp:
 
     def run_code_mode(self):
         self.show_header("CODE ANALYZER")
-        self.console.print("[yellow]Paste code (Ctrl+D / Ctrl+Z + Enter to submit):[/yellow]")
+        self.console.print("[yellow]Paste the code and press Enter. Then, press Ctrl+D (on Linux/macOS) or Ctrl+Z (on Windows) to submit:[/yellow]")
         code = sys.stdin.read()
         if not code.strip(): return
 
@@ -232,14 +239,16 @@ class AITutorApp:
             menu.add_row("[cyan]1.[/]", "Practice Quiz Mode")
             menu.add_row("[cyan]2.[/]", "Socratic Tutoring")
             menu.add_row("[cyan]3.[/]", "Code Analysis")
-            menu.add_row("[red]4.[/]", "Exit")
+            menu.add_row("[cyan]4.[/]", "Concept Explainer")
+            menu.add_row("[red]5.[/]", "Exit")
             self.console.print(menu)
 
             choice = self.console.input("\n[bold]Select option: [/bold]")
             if choice == '1': self.run_quiz_mode()
             elif choice == '2': self.run_tutor_mode()
             elif choice == '3': self.run_code_mode()
-            elif choice == '4': break
+            elif choice == '4': self.run_explainer_mode()
+            elif choice == '5': break
 
 if __name__ == "__main__":
     app = AITutorApp()
