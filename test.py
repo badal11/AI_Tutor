@@ -110,10 +110,21 @@ class AITutorApp:
     def run_quiz_mode(self):
         self.show_header("PRACTICE QUIZ GENERATOR")
         topic = self.console.input("[bold yellow]What topic do you want to practice? [/bold yellow]")
-        
+
+        # Ask how many questions
+        while True:
+            try:
+                num_questions = int(self.console.input("[bold yellow]How many questions do you want? [/bold yellow]"))
+                if num_questions > 0:
+                    break
+                else:
+                    self.console.print("[red]Please enter a positive number.[/red]")
+            except ValueError:
+                self.console.print("[red]Invalid input. Enter a number.[/red]")
+
         sys_prompt = (
             "You are a quiz creator. Return ONLY valid JSON. "
-            "Return a JSON ARRAY (list) of exactly 3 multiple-choice questions. "
+            f"Return a JSON ARRAY (list) of of multiple-choice questions. "
             "Each item must follow this format:\n"
             "{\n"
             "  \"question\": \"...\",\n"
@@ -127,29 +138,30 @@ class AITutorApp:
         all_questions = []
         previous_questions = set()  # Track question texts to avoid duplicates
 
-        with Live(Spinner("dots", text=f"Generating questions for [cyan]{topic}[/]..."), refresh_per_second=10):
-            while len(all_questions) < 3:
+        with Live(Spinner("dots", text=f"Generating {num_questions} questions for [cyan]{topic}[/]..."), refresh_per_second=10):
+            while len(all_questions) < num_questions:
                 if not previous_questions:
                     # First call, just use the topic
                     prompt_variation = topic
                 else:
                     # Ask for a different question than the ones before
                     prompt_variation = f"{topic}. Ask a different question than before: avoid questions {list(previous_questions)}"
-                
+                                
                 data = self.client.generate_json(MODELS["generator"], prompt_variation, sys_prompt)
                 if not data:
                     break
 
                 for q in data:
                     # Only add if question text is new
+
                     if q["question"] not in previous_questions:
                         all_questions.append(q)
                         previous_questions.add(q["question"])
-                    if len(all_questions) >= 3:
+                    if len(all_questions) >= num_questions:
                         break
 
-        # Trim to exactly 3 questions
-        all_questions = all_questions[:3]
+        # Trim to exactly the number requested
+        all_questions = all_questions[:num_questions]
 
         try:
             questions = [Question(**q) for q in all_questions]
