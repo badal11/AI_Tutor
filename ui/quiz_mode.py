@@ -8,6 +8,7 @@ from domain.models import Question
 from domain.quiz_session import QuizSession
 from ui.common import console, show_header
 from ui.explainer_mode import enter_explainer_mode
+from core.prompts import quiz_system_prompt
 
 
 def run_quiz_mode(client, progress):
@@ -27,19 +28,7 @@ def run_quiz_mode(client, progress):
         except ValueError:
             console.print("[red]Invalid input. Enter a number.[/red]")
 
-    sys_prompt = (
-        "You are a quiz creator. Return ONLY valid JSON. "
-        f"Target difficulty: Level {current_level} out of 10. "
-        f"Return a JSON ARRAY (list) of multiple-choice questions. "
-        "Format:\n"
-        "{\n"
-        "  \"question\": \"...\",\n"
-        "  \"options\": {\"A\": \"...\", \"B\": \"...\", \"C\": \"...\", \"D\": \"...\"},\n"
-        "  \"correct_answer\": \"A\",\n"
-        "  \"explanation\": \"...\"\n"
-        "}\n"
-        "Do NOT return a single object. Do NOT add any extra text."
-    )
+    sys_prompt = quiz_system_prompt(topic, current_level)
 
     all_questions = []
     previous_questions = set()
