@@ -8,7 +8,8 @@ from domain.models import Question
 from domain.quiz_session import QuizSession
 from ui.common import console, show_header
 from ui.explainer_mode import enter_explainer_mode
-from core.prompts import quiz_system_prompt
+from core.prompts import quiz_system_prompt, map_level_to_difficulty
+from core.prompts import quiz_system_prompt, verification_prompt
 
 
 def run_quiz_mode(client, progress):
@@ -28,37 +29,50 @@ def run_quiz_mode(client, progress):
         except ValueError:
             console.print("[red]Invalid input. Enter a number.[/red]")
 
-    sys_prompt = quiz_system_prompt(topic, current_level)
-
     all_questions = []
     previous_questions = set()
 
-    with Live(Spinner("dots", text=f"Generating {num_questions} Level {current_level} questions..."), refresh_per_second=10):
+    with Live(Spinner("dots", text=f"Generating {num_questions} questions..."), refresh_per_second=10):
         while len(all_questions) < num_questions:
+            # Prompt variation for diversity
             if not previous_questions:
                 prompt_variation = topic
             else:
                 prompt_variation = f"{topic}. Ask a different question than: {list(previous_questions)[-3:]}"
 
+            # System prompt with descriptive difficulty
+            sys_prompt = quiz_system_prompt(topic, current_level)
+
+            # Generate question(s)
             data = client.generate_json(MODELS["generator"], prompt_variation, sys_prompt)
             if not data:
                 break
 
             for q in data:
-                if q["question"] not in previous_questions:
-                    all_questions.append(q)
-                    previous_questions.add(q["question"])
+                if q["question"] in previous_questions:
+                    continue
+
+                verif_prompt = verification_prompt(q["question"], q["options"], q["correct_answer"])
+                verification = client.generate_json(MODELS["explainer"], "", verif_prompt)
+                if verification and isinstance(verification, list) and "correct_answer" in verification[0]:
+                    q["correct_answer"] = verification[0]["correct_answer"]
+                # Add to quiz
+                all_questions.append(q)
+                previous_questions.add(q["question"])
+
                 if len(all_questions) >= num_questions:
                     break
 
     all_questions = all_questions[:num_questions]
 
+    # Convert JSON to Question objects
     try:
         questions = [Question(**q) for q in all_questions]
     except TypeError:
         console.print("[red]Error: Invalid question format from model[/red]")
         return
 
+    # --- Quiz session ---
     session = QuizSession(questions)
 
     while not session.is_complete():
@@ -69,7 +83,12 @@ def run_quiz_mode(client, progress):
         for key, val in q.options.items():
             q_text += f"* **{key}**: {val}\n"
 
-        console.print(Panel(Markdown(q_text), title=f"Score: {session.score} | Level: {current_level}", border_style="cyan"))
+        console.print(
+            Panel(Markdown(q_text),
+                  title=f"Score: {session.score} | Level: {current_level}",
+                  border_style="cyan")
+        )
+
         choice = console.input("\n[bold]Answer (A/B/C/D) or type 'explain': [/bold]").upper()
 
         if choice == "EXPLAIN":

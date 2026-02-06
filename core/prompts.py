@@ -43,3 +43,19 @@ def quiz_system_prompt(topic: str, level: int) -> str:
         "}\n"
         "Do NOT return a single object. Do NOT add any extra text."
     )
+
+
+def verification_prompt(question: str, options: dict, proposed_answer: str) -> str:
+    """
+    Returns a system prompt to verify a multiple-choice question's correct answer.
+    The model should return a JSON with the verified correct answer.
+    """
+    return (
+        f"You are a quiz verifier. Here is a multiple-choice question:\n\n"
+        f"Question: {question}\n"
+        f"Options: {options}\n"
+        f"Proposed correct answer: {proposed_answer}\n\n"
+        f"Check if the answer is correct. If it is correct, return it. "
+        f"If not, provide the correct answer only. "
+        f"Return JSON: {{\"correct_answer\": \"<letter>\"}}"
+    )
