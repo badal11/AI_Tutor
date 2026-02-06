@@ -42,6 +42,13 @@ def quiz_system_prompt(topic: str, level: int) -> str:
         "  \"explanation\": \"...\"\n"
         "}\n"
         "Do NOT return a single object. Do NOT add any extra text."
+        "Ensure the following instructional principles are strictly followed:\n"
+        "1. Clarity: Each question and option must be clear and unambiguous.\n"
+        "2. Relevance: The content must be directly related to the topic.\n"
+        "3. Cognitive appropriateness: The difficulty must match the specified level.\n"
+        "4. Valid options: Each question must have 4 distinct options labeled A, B, C, D.\n"
+        "5. Correct answer: Must be accurate and verifiable.\n"
+        "6. Explanation: Provide a short explanation for the correct answer.\n"
     )
 
 
