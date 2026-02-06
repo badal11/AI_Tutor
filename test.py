@@ -1,8 +1,8 @@
 import json
 import sys
 import requests
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional
+from dataclasses import dataclass
+from typing import List, Dict
 
 # Rich UI imports
 from rich.console import Console
@@ -18,7 +18,9 @@ MODELS = {
     "generator": "gemma2:2b",
     "coder": "qwen2.5:3b"
 }
-OLLAMA_URL = "http://localhost:11434/api/generate"
+# Note: Using /api/chat for history-based modes
+OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
+OLLAMA_GEN_URL = "http://localhost:11434/api/generate"
 
 # --- 1. Data Models ---
 @dataclass
@@ -31,31 +33,37 @@ class Question:
 # --- 2. API Client ---
 class OllamaClient:
     """Handles communication with the Ollama local API."""
-    def __init__(self, url: str):
-        self.url = url
-
-    def generate(self, model: str, prompt: str, system_prompt: str = "") -> str:
+    
+    def chat(self, model: str, messages: List[Dict[str, str]]) -> str:
+        """Handles multi-turn conversations using the Chat API."""
         payload = {
             "model": model,
-            "prompt": f"System: {system_prompt}\n\nUser: {prompt}",
+            "messages": messages,
             "stream": False,
-            "options": {"temperature": 0.2} # Low temperature for consistent JSON
+            "options": {"temperature": 0.7}
         }
         try:
-            response = requests.post(self.url, json=payload, timeout=60)
+            response = requests.post(OLLAMA_CHAT_URL, json=payload, timeout=60)
             response.raise_for_status()
-            return response.json().get("response", "")
+            return response.json().get("message", {}).get("content", "")
         except Exception as e:
-            return f"Error: {str(e)}"
+            return f"Error connecting to Ollama: {str(e)}"
 
     def generate_json(self, model: str, topic: str, system_prompt: str):
-        """Helper to specifically handle JSON responses from the AI."""
-        raw_output = self.generate(model, topic, system_prompt)
-        # Clean markdown code blocks if the AI includes them
-        clean_json = raw_output.replace("```json", "").replace("```", "").strip()
+        """Helper for structured JSON data (used for Quiz generation)."""
+        payload = {
+            "model": model,
+            "prompt": f"System: {system_prompt}\n\nUser: {topic}",
+            "stream": False,
+            "format": "json", # Forces Ollama to output valid JSON
+            "options": {"temperature": 0.2}
+        }
         try:
-            return json.loads(clean_json)
-        except json.JSONDecodeError:
+            response = requests.post(OLLAMA_GEN_URL, json=payload, timeout=60)
+            response.raise_for_status()
+            raw_output = response.json().get("response", "")
+            return json.loads(raw_output)
+        except Exception:
             return None
 
 # --- 3. Session Management ---
@@ -83,7 +91,7 @@ class QuizSession:
 # --- 4. CLI Interface & Main App ---
 class AITutorApp:
     def __init__(self):
-        self.client = OllamaClient(OLLAMA_URL)
+        self.client = OllamaClient()
         self.console = Console()
 
     def show_header(self, title: str):
@@ -104,30 +112,23 @@ class AITutorApp:
             data = self.client.generate_json(MODELS["generator"], topic, sys_prompt)
 
         if not data:
-            self.console.print("[red]Error: Could not parse quiz data. Try again.[/red]")
-            self.console.input("\nPress Enter...")
+            self.console.print("[red]Error: Could not generate quiz. Ensure Ollama is running.[/red]")
             return
 
-        # Initialize Session
         questions = [Question(**q) for q in data]
         session = QuizSession(questions)
 
-        # Quiz Loop
         while not session.is_complete():
             q = session.current_question
             self.show_header(f"Question {session.current_index + 1} of {len(questions)}")
             
-            # Display Question
             q_text = f"**{q.question}**\n\n"
             for key, val in q.options.items():
                 q_text += f"* **{key}**: {val}\n"
             
             self.console.print(Panel(Markdown(q_text), title=f"Score: {session.score}", border_style="cyan"))
-            
-            # Get User Input
             choice = self.console.input("\n[bold]Your Answer (A/B/C/D): [/bold]").upper()
             
-            # Logic & Feedback
             correct = session.process_answer(choice)
             color = "green" if correct else "red"
             msg = "✅ [bold]Correct![/bold]" if correct else f"❌ [bold]Incorrect![/bold] The answer was {q.correct_answer}."
@@ -135,22 +136,29 @@ class AITutorApp:
             self.console.print(Panel(f"{msg}\n\n[italic]{q.explanation}[/italic]", border_style=color))
             self.console.input("\n[dim]Press Enter for next question...[/dim]")
 
-        # Final Result
-        self.show_header("RESULTS")
-        percent = (session.score / len(questions)) * 100
-        self.console.print(f"\n[bold gold1]Quiz Finished![/bold gold1]")
-        self.console.print(f"Final Score: [bold cyan]{session.score}/{len(questions)}[/bold cyan] ({percent}%)\n")
-        self.console.input("[dim]Press Enter to return to menu...[/dim]")
-
     def run_tutor_mode(self):
         self.show_header("SOCRATIC TUTOR")
-        sys_msg = "You are a Socratic tutor. Use questions to guide the student to the answer."
+        self.console.print("[dim]The tutor will guide you. Type 'menu' to quit.[/dim]\n")
+        
+        # This list maintains the memory of the conversation
+        history = [
+            {"role": "system", "content": "You are a Socratic tutor. Never give answers directly. "
+                                          "Instead, ask short, helpful questions to guide the student."}
+        ]
+
         while True:
             user_input = self.console.input("[bold green]You: [/bold green]")
             if user_input.lower() in ['exit', 'menu']: break
             
+            # 1. Add User input to history
+            history.append({"role": "user", "content": user_input})
+            
             with Live(Spinner("dots", text="Tutor is thinking...")):
-                response = self.client.generate(MODELS["tutor"], user_input, sys_msg)
+                # 2. Send the FULL history to the AI
+                response = self.client.chat(MODELS["tutor"], history)
+            
+            # 3. Add AI response to history
+            history.append({"role": "assistant", "content": response})
             
             self.console.print(Panel(Markdown(response), title="Tutor", border_style="blue"))
 
@@ -160,19 +168,23 @@ class AITutorApp:
         code = sys.stdin.read()
         if not code.strip(): return
 
+        history = [
+            {"role": "system", "content": "Explain bugs and concepts in this code for a beginner."},
+            {"role": "user", "content": code}
+        ]
+
         with Live(Spinner("dots", text="Analyzing code...")):
-            sys_msg = "Explain bugs and concepts in this code for a beginner."
-            result = self.client.generate(MODELS["coder"], code, sys_msg)
+            result = self.client.chat(MODELS["coder"], history)
         
         self.console.print(Panel(Markdown(result), title="Analysis", border_style="magenta"))
         self.console.input("\nPress Enter...")
 
     def main_menu(self):
         while True:
-            self.show_header("AI TUTOR v3.0")
+            self.show_header("AI TUTOR v4.0")
             menu = Table(show_header=False, box=None)
             menu.add_row("[cyan]1.[/]", "Practice Quiz Mode")
-            menu.add_row("[cyan]2.[/]", "Socratic Tutoring")
+            menu.add_row("[cyan]2.[/]", "Socratic Tutoring (With Memory)")
             menu.add_row("[cyan]3.[/]", "Code Analysis")
             menu.add_row("[red]4.[/]", "Exit")
             self.console.print(menu)
