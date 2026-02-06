@@ -1,15 +1,11 @@
 {
     "topics": {
         "python": {
-            "level": 1,
+            "level": 11,
             "history": [
-                false,
-                false,
                 true,
                 true,
-                false,
-                false,
-                true
+                false
             ]
         }
     }

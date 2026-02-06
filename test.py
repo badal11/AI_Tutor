@@ -179,44 +179,73 @@ class AITutorApp:
         # Tracking Integration
         stats = self.progress.get_topic_stats(topic)
         current_level = stats["level"]
-        
         self.console.print(f"[dim]Current Proficiency Level for {topic}: {current_level}/10[/dim]")
 
+        # Ask how many questions
         while True:
             try:
-                num_questions = int(self.console.input("[bold yellow]How many questions? [/bold yellow]"))
-                if num_questions > 0: break
+                num_questions = int(self.console.input("[bold yellow]How many questions do you want? [/bold yellow]"))
+                if num_questions > 0:
+                    break
+                else:
+                    self.console.print("[red]Please enter a positive number.[/red]")
             except ValueError:
-                self.console.print("[red]Invalid input.[/red]")
+                self.console.print("[red]Invalid input. Enter a number.[/red]")
 
         sys_prompt = (
-            f"Return ONLY a JSON ARRAY of MCQs. "
-            f"Target difficulty: Level {current_level} out of 10 (1=Beginner, 10=Expert). "
-            "Format: {\"question\": \"...\", \"options\": {\"A\": \"...\"}, \"correct_answer\": \"A\", \"explanation\": \"...\"}"
+            "You are a quiz creator. Return ONLY valid JSON. "
+            f"Target difficulty: Level {current_level} out of 10. "
+            f"Return a JSON ARRAY (list) of multiple-choice questions. "
+            "Format:\n"
+            "{\n"
+            "  \"question\": \"...\",\n"
+            "  \"options\": {\"A\": \"...\", \"B\": \"...\", \"C\": \"...\", \"D\": \"...\"},\n"
+            "  \"correct_answer\": \"A\",\n"
+            "  \"explanation\": \"...\"\n"
+            "}\n"
+            "Do NOT return a single object. Do NOT add any extra text."
         )
 
         all_questions = []
-        with Live(Spinner("dots", text=f"Generating Level {current_level} questions...")):
-            data = self.client.generate_json(MODELS["generator"], topic, sys_prompt)
-            if data:
-                all_questions = [Question(**q) for q in data[:num_questions]]
+        previous_questions = set()
 
-        if not all_questions:
-            self.console.print("[red]Failed to generate questions.[/red]")
+        with Live(Spinner("dots", text=f"Generating {num_questions} Level {current_level} questions..."), refresh_per_second=10):
+            while len(all_questions) < num_questions:
+                if not previous_questions:
+                    prompt_variation = topic
+                else:
+                    prompt_variation = f"{topic}. Ask a different question than: {list(previous_questions)[-3:]}"
+                                
+                data = self.client.generate_json(MODELS["generator"], prompt_variation, sys_prompt)
+                if not data:
+                    break
+
+                for q in data:
+                    if q["question"] not in previous_questions:
+                        all_questions.append(q)
+                        previous_questions.add(q["question"])
+                    if len(all_questions) >= num_questions:
+                        break
+
+        all_questions = all_questions[:num_questions]
+
+        try:
+            questions = [Question(**q) for q in all_questions]
+        except TypeError as e:
+            self.console.print("[red]Error: Invalid question format from model[/red]")
             return
 
-        session = QuizSession(all_questions)
+        session = QuizSession(questions)
 
         while not session.is_complete():
             q = session.current_question
-            self.show_header(f"Question {session.current_index + 1} of {len(all_questions)}")
+            self.show_header(f"Question {session.current_index + 1} of {len(questions)}")
             
             q_text = f"**{q.question}**\n\n"
             for key, val in q.options.items():
                 q_text += f"* **{key}**: {val}\n"
             
             self.console.print(Panel(Markdown(q_text), title=f"Score: {session.score} | Level: {current_level}", border_style="cyan"))
-            
             choice = self.console.input("\n[bold]Answer (A/B/C/D) or type 'explain': [/bold]").upper()
             
             if choice == 'EXPLAIN':
@@ -224,12 +253,11 @@ class AITutorApp:
                 continue 
 
             correct = session.process_answer(choice)
-            
-            # Save Progress
+            # Save Progress (Adaptive Logic)
             self.progress.update_progress(topic, correct)
             
             color = "green" if correct else "red"
-            msg = "✅ Correct!" if correct else f"❌ Incorrect! The answer was {q.correct_answer}."
+            msg = "✅ [bold]Correct![/bold]" if correct else f"❌ [bold]Incorrect![/bold] The answer was {q.correct_answer}."
             
             self.console.print(Panel(f"{msg}\n\n[italic]{q.explanation}[/italic]", border_style=color))
             
@@ -238,6 +266,9 @@ class AITutorApp:
                 self.enter_explainer_mode(f"Context: {q.question}. Correct Answer: {q.correct_answer}. Explanation: {q.explanation}")
             
             session.next_question()
+
+        self.console.print(f"\n[bold green]Quiz Complete! Final Score: {session.score}/{len(questions)}[/bold green]")
+        self.console.input("[dim]Press Enter to return to main menu...[/dim]")
 
     def run_tutor_mode(self):
         self.show_header("SOCRATIC TUTOR")
