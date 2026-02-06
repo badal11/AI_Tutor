@@ -1,0 +1,16 @@
+{
+    "topics": {
+        "python": {
+            "level": 1,
+            "history": [
+                false,
+                false,
+                true,
+                true,
+                false,
+                false,
+                true
+            ]
+        }
+    }
+}

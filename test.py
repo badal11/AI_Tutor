@@ -1,5 +1,6 @@
 import json
 import sys
+import os
 import requests
 from dataclasses import dataclass
 from typing import List, Dict
@@ -17,7 +18,7 @@ MODELS = {
     "tutor": "llama3.2:3b",
     "generator": "gemma2:2b",
     "coder": "qwen2.5:3b",
-    "explainer": "llama3.2:3b"  # Explainer usually benefits from a general instructor model
+    "explainer": "llama3.2:3b"
 }
 
 OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
@@ -31,7 +32,50 @@ class Question:
     correct_answer: str
     explanation: str
 
-# --- 2. API Client ---
+# --- 2. Progress Tracking ---
+class ProgressManager:
+    """Handles saving and loading user performance data."""
+    def __init__(self, filename="user_progress.json"):
+        self.filename = filename
+        self.data = self._load_data()
+
+    def _load_data(self):
+        if os.path.exists(self.filename):
+            try:
+                with open(self.filename, 'r') as f:
+                    return json.load(f)
+            except:
+                return {"topics": {}}
+        return {"topics": {}}
+
+    def get_topic_stats(self, topic: str):
+        topic = topic.lower().strip()
+        return self.data["topics"].get(topic, {"level": 1, "history": []})
+
+    def update_progress(self, topic: str, is_correct: bool):
+        topic = topic.lower().strip()
+        if topic not in self.data["topics"]:
+            self.data["topics"][topic] = {"level": 1, "history": []}
+        
+        stats = self.data["topics"][topic]
+        stats["history"].append(is_correct)
+        
+        # Adaptive Logic: 3 correct in a row = Level Up. 2 wrong in a row = Level Down (min 1).
+        recent = stats["history"][-3:]
+        if recent == [True, True, True]:
+            stats["level"] += 1
+            stats["history"] = [] 
+        elif recent[-2:] == [False, False] and stats["level"] > 1:
+            stats["level"] -= 1
+            stats["history"] = []
+
+        self._save_data()
+
+    def _save_data(self):
+        with open(self.filename, 'w') as f:
+            json.dump(self.data, f, indent=4)
+
+# --- 3. API Client ---
 class OllamaClient:
     """Handles communication with the Ollama local API."""
     
@@ -68,7 +112,7 @@ class OllamaClient:
         except Exception as e:
             return None
 
-# --- 3. Session Management ---
+# --- 4. Session Management ---
 class QuizSession:
     def __init__(self, questions: List[Question]):
         self.questions = questions
@@ -91,18 +135,18 @@ class QuizSession:
     def is_complete(self) -> bool:
         return self.current_index >= len(self.questions)
 
-# --- 4. CLI Interface & Main App ---
+# --- 5. CLI Interface & Main App ---
 class AITutorApp:
     def __init__(self):
         self.client = OllamaClient()
         self.console = Console()
+        self.progress = ProgressManager()
 
     def show_header(self, title: str):
         self.console.clear()
         self.console.print(Panel(f"[bold blue]{title}[/bold blue]", expand=False))
 
     def enter_explainer_mode(self, context: str):
-        """Reusable sub-mode to deep-dive into specific concepts."""
         self.console.print(Panel("[bold magenta]EXPLORER MODE ACTIVATED[/]\n[dim]Ask follow-up questions about the topic. Type 'back' to return.[/]", border_style="magenta"))
         
         history = [
@@ -123,7 +167,6 @@ class AITutorApp:
             self.console.print(Panel(Markdown(response), title="Explanation", border_style="magenta"))
 
     def run_explainer_mode(self):
-        """Standalone Explainer Feature."""
         self.show_header("CONCEPT EXPLAINER")
         topic = self.console.input("[bold magenta]What concept or topic should I explain? [/bold magenta]")
         if topic.strip():
@@ -132,6 +175,12 @@ class AITutorApp:
     def run_quiz_mode(self):
         self.show_header("PRACTICE QUIZ GENERATOR")
         topic = self.console.input("[bold yellow]What topic do you want to practice? [/bold yellow]")
+        
+        # Tracking Integration
+        stats = self.progress.get_topic_stats(topic)
+        current_level = stats["level"]
+        
+        self.console.print(f"[dim]Current Proficiency Level for {topic}: {current_level}/10[/dim]")
 
         while True:
             try:
@@ -141,12 +190,13 @@ class AITutorApp:
                 self.console.print("[red]Invalid input.[/red]")
 
         sys_prompt = (
-            "Return ONLY a JSON ARRAY of MCQs. Format: "
-            "{\"question\": \"...\", \"options\": {\"A\": \"...\"}, \"correct_answer\": \"A\", \"explanation\": \"...\"}"
+            f"Return ONLY a JSON ARRAY of MCQs. "
+            f"Target difficulty: Level {current_level} out of 10 (1=Beginner, 10=Expert). "
+            "Format: {\"question\": \"...\", \"options\": {\"A\": \"...\"}, \"correct_answer\": \"A\", \"explanation\": \"...\"}"
         )
 
         all_questions = []
-        with Live(Spinner("dots", text=f"Generating questions for [cyan]{topic}[/]...")):
+        with Live(Spinner("dots", text=f"Generating Level {current_level} questions...")):
             data = self.client.generate_json(MODELS["generator"], topic, sys_prompt)
             if data:
                 all_questions = [Question(**q) for q in data[:num_questions]]
@@ -165,22 +215,24 @@ class AITutorApp:
             for key, val in q.options.items():
                 q_text += f"* **{key}**: {val}\n"
             
-            self.console.print(Panel(Markdown(q_text), title=f"Score: {session.score}", border_style="cyan"))
+            self.console.print(Panel(Markdown(q_text), title=f"Score: {session.score} | Level: {current_level}", border_style="cyan"))
             
-            # --- Explainer integration before answering ---
             choice = self.console.input("\n[bold]Answer (A/B/C/D) or type 'explain': [/bold]").upper()
             
             if choice == 'EXPLAIN':
                 self.enter_explainer_mode(f"Topic: {topic}. Question: {q.question}")
-                continue # Re-show question after explanation
+                continue 
 
             correct = session.process_answer(choice)
+            
+            # Save Progress
+            self.progress.update_progress(topic, correct)
+            
             color = "green" if correct else "red"
             msg = "✅ Correct!" if correct else f"❌ Incorrect! The answer was {q.correct_answer}."
             
             self.console.print(Panel(f"{msg}\n\n[italic]{q.explanation}[/italic]", border_style=color))
             
-            # --- Explainer integration after answering ---
             post_action = self.console.input("\n[dim][Enter] Next | [E]xplain further: [/dim]").lower()
             if post_action == 'e':
                 self.enter_explainer_mode(f"Context: {q.question}. Correct Answer: {q.correct_answer}. Explanation: {q.explanation}")
@@ -211,7 +263,7 @@ class AITutorApp:
 
     def run_code_mode(self):
         self.show_header("CODE ANALYZER")
-        self.console.print("[yellow]Paste the code and press Enter. Then, press Ctrl+D (on Linux/macOS) or Ctrl+Z (on Windows) to submit:[/yellow]")
+        self.console.print("[yellow]Paste code (Ctrl+D/Ctrl+Z to submit):[/yellow]")
         code = sys.stdin.read()
         if not code.strip(): return
 
@@ -234,9 +286,9 @@ class AITutorApp:
 
     def main_menu(self):
         while True:
-            self.show_header("AI TUTOR v5.0")
+            self.show_header("AI TUTOR v5.0 (ADAPTIVE)")
             menu = Table(show_header=False, box=None)
-            menu.add_row("[cyan]1.[/]", "Practice Quiz Mode")
+            menu.add_row("[cyan]1.[/]", "Practice Quiz Mode (Level-Aware)")
             menu.add_row("[cyan]2.[/]", "Socratic Tutoring")
             menu.add_row("[cyan]3.[/]", "Code Analysis")
             menu.add_row("[cyan]4.[/]", "Concept Explainer")
