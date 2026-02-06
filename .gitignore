@@ -5,3 +5,4 @@ __pycache__
 *.log
 *.pdf
 Code_Explainer
+user_progress.json
