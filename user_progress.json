@@ -1,12 +1,14 @@
 {
-    "topics": {
-        "python": {
-            "level": 11,
-            "history": [
-                true,
-                true,
-                false
-            ]
-        }
+  "topics": {
+    "python": {
+      "level": 12,
+      "history": []
+    },
+    "gold": {
+      "level": 10,
+      "history": [
+        true
+      ]
     }
+  }
 }
