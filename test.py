@@ -125,23 +125,28 @@ class AITutorApp:
         )
 
         all_questions = []
-        
+        previous_questions = set()  # Track question texts to avoid duplicates
+
         with Live(Spinner("dots", text=f"Generating questions for [cyan]{topic}[/]..."), refresh_per_second=10):
-            # Call model multiple times to reliably get 3 questions
             while len(all_questions) < 3:
-                data = self.client.generate_json(MODELS["generator"], topic, sys_prompt)
+                if not previous_questions:
+                    # First call, just use the topic
+                    prompt_variation = topic
+                else:
+                    # Ask for a different question than the ones before
+                    prompt_variation = f"{topic}. Ask a different question than before: avoid questions {list(previous_questions)}"
+                
+                data = self.client.generate_json(MODELS["generator"], prompt_variation, sys_prompt)
                 if not data:
                     break
 
                 for q in data:
-                    all_questions.append(q)
+                    # Only add if question text is new
+                    if q["question"] not in previous_questions:
+                        all_questions.append(q)
+                        previous_questions.add(q["question"])
                     if len(all_questions) >= 3:
                         break
-
-        if len(all_questions) < 1:
-            self.console.print("[red]Error: Could not generate quiz. Ensure Ollama is running.[/red]")
-            self.console.input("\nPress Enter...")
-            return
 
         # Trim to exactly 3 questions
         all_questions = all_questions[:3]
