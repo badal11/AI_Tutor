@@ -55,15 +55,24 @@ class OllamaClient:
             "model": model,
             "prompt": f"System: {system_prompt}\n\nUser: {topic}",
             "stream": False,
-            "format": "json", # Forces Ollama to output valid JSON
+            "format": "json",  # Forces Ollama to output valid JSON
             "options": {"temperature": 0.2}
         }
         try:
             response = requests.post(OLLAMA_GEN_URL, json=payload, timeout=60)
             response.raise_for_status()
             raw_output = response.json().get("response", "")
-            return json.loads(raw_output)
-        except Exception:
+
+            # Some models return JSON as string; normalize here
+            data = json.loads(raw_output)
+
+            # Normalize single object to list
+            if isinstance(data, dict):
+                data = [data]
+
+            return data
+        except Exception as e:
+            print("JSON generation error:", e)
             return None
 
 # --- 3. Session Management ---
@@ -103,19 +112,49 @@ class AITutorApp:
         topic = self.console.input("[bold yellow]What topic do you want to practice? [/bold yellow]")
         
         sys_prompt = (
-            "You are a quiz creator. Return ONLY a JSON list of 3 multiple-choice questions. "
-            "Format: [{\"question\": \"...\", \"options\": {\"A\": \"...\", \"B\": \"...\"}, "
-            "\"correct_answer\": \"A\", \"explanation\": \"...\"}]"
+            "You are a quiz creator. Return ONLY valid JSON. "
+            "Return a JSON ARRAY (list) of exactly 3 multiple-choice questions. "
+            "Each item must follow this format:\n"
+            "{\n"
+            "  \"question\": \"...\",\n"
+            "  \"options\": {\"A\": \"...\", \"B\": \"...\", \"C\": \"...\", \"D\": \"...\"},\n"
+            "  \"correct_answer\": \"A\",\n"
+            "  \"explanation\": \"...\"\n"
+            "}\n"
+            "Do NOT return a single object. Do NOT add any extra text."
         )
 
+        all_questions = []
+        
         with Live(Spinner("dots", text=f"Generating questions for [cyan]{topic}[/]..."), refresh_per_second=10):
-            data = self.client.generate_json(MODELS["generator"], topic, sys_prompt)
+            # Call model multiple times to reliably get 3 questions
+            while len(all_questions) < 3:
+                data = self.client.generate_json(MODELS["generator"], topic, sys_prompt)
+                if not data:
+                    break
 
-        if not data:
+                for q in data:
+                    all_questions.append(q)
+                    if len(all_questions) >= 3:
+                        break
+
+        if len(all_questions) < 1:
             self.console.print("[red]Error: Could not generate quiz. Ensure Ollama is running.[/red]")
+            self.console.input("\nPress Enter...")
             return
 
-        questions = [Question(**q) for q in data]
+        # Trim to exactly 3 questions
+        all_questions = all_questions[:3]
+
+        try:
+            questions = [Question(**q) for q in all_questions]
+        except TypeError as e:
+            self.console.print("[red]Error: Invalid question format from model[/red]")
+            self.console.print(str(e))
+            self.console.print(all_questions)
+            self.console.input("\nPress Enter...")
+            return
+
         session = QuizSession(questions)
 
         while not session.is_complete():
