@@ -16,9 +16,10 @@ from rich.markdown import Markdown
 MODELS = {
     "tutor": "llama3.2:3b",
     "generator": "gemma2:2b",
-    "coder": "qwen2.5:3b"
+    "coder": "qwen2.5:3b",
+    "explainer": "llama3.2:3b"  # Explainer usually benefits from a general instructor model
 }
-# Note: Using /api/chat for history-based modes
+
 OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
 OLLAMA_GEN_URL = "http://localhost:11434/api/generate"
 
@@ -26,8 +27,8 @@ OLLAMA_GEN_URL = "http://localhost:11434/api/generate"
 @dataclass
 class Question:
     question: str
-    options: Dict[str, str]  # Format: {"A": "Choice 1", "B": "Choice 2", ...}
-    correct_answer: str      # Format: "A"
+    options: Dict[str, str]
+    correct_answer: str
     explanation: str
 
 # --- 2. API Client ---
@@ -35,7 +36,6 @@ class OllamaClient:
     """Handles communication with the Ollama local API."""
     
     def chat(self, model: str, messages: List[Dict[str, str]]) -> str:
-        """Handles multi-turn conversations using the Chat API."""
         payload = {
             "model": model,
             "messages": messages,
@@ -50,34 +50,26 @@ class OllamaClient:
             return f"Error connecting to Ollama: {str(e)}"
 
     def generate_json(self, model: str, topic: str, system_prompt: str):
-        """Helper for structured JSON data (used for Quiz generation)."""
         payload = {
             "model": model,
             "prompt": f"System: {system_prompt}\n\nUser: {topic}",
             "stream": False,
-            "format": "json",  # Forces Ollama to output valid JSON
+            "format": "json",
             "options": {"temperature": 0.2}
         }
         try:
             response = requests.post(OLLAMA_GEN_URL, json=payload, timeout=60)
             response.raise_for_status()
             raw_output = response.json().get("response", "")
-
-            # Some models return JSON as string; normalize here
             data = json.loads(raw_output)
-
-            # Normalize single object to list
             if isinstance(data, dict):
                 data = [data]
-
             return data
         except Exception as e:
-            print("JSON generation error:", e)
             return None
 
 # --- 3. Session Management ---
 class QuizSession:
-    """Tracks score and progress for an active quiz."""
     def __init__(self, questions: List[Question]):
         self.questions = questions
         self.score = 0
@@ -91,8 +83,10 @@ class QuizSession:
         is_correct = user_choice.strip().upper() == self.current_question.correct_answer.upper()
         if is_correct:
             self.score += 1
-        self.current_index += 1
         return is_correct
+
+    def next_question(self):
+        self.current_index += 1
 
     def is_complete(self) -> bool:
         return self.current_index >= len(self.questions)
@@ -107,115 +101,105 @@ class AITutorApp:
         self.console.clear()
         self.console.print(Panel(f"[bold blue]{title}[/bold blue]", expand=False))
 
+    def enter_explainer_mode(self, context: str):
+        """Reusable sub-mode to deep-dive into specific concepts."""
+        self.console.print(Panel("[bold magenta]EXPLORER MODE ACTIVATED[/]\n[dim]Ask follow-up questions about the topic. Type 'back' to return.[/]", border_style="magenta"))
+        
+        history = [
+            {"role": "system", "content": f"You are a helpful assistant. Provide deep explanations for this context: {context}. Use Markdown for formatting."},
+        ]
+
+        while True:
+            user_input = self.console.input("[bold magenta]Explain Mode > [/bold magenta]")
+            if user_input.lower() in ['back', 'exit', 'quit']:
+                break
+            
+            history.append({"role": "user", "content": user_input})
+            
+            with Live(Spinner("dots", text="Exploring concepts...")):
+                response = self.client.chat(MODELS["explainer"], history)
+            
+            history.append({"role": "assistant", "content": response})
+            self.console.print(Panel(Markdown(response), title="Explanation", border_style="magenta"))
+
     def run_quiz_mode(self):
         self.show_header("PRACTICE QUIZ GENERATOR")
         topic = self.console.input("[bold yellow]What topic do you want to practice? [/bold yellow]")
 
-        # Ask how many questions
         while True:
             try:
-                num_questions = int(self.console.input("[bold yellow]How many questions do you want? [/bold yellow]"))
-                if num_questions > 0:
-                    break
-                else:
-                    self.console.print("[red]Please enter a positive number.[/red]")
+                num_questions = int(self.console.input("[bold yellow]How many questions? [/bold yellow]"))
+                if num_questions > 0: break
             except ValueError:
-                self.console.print("[red]Invalid input. Enter a number.[/red]")
+                self.console.print("[red]Invalid input.[/red]")
 
         sys_prompt = (
-            "You are a quiz creator. Return ONLY valid JSON. "
-            f"Return a JSON ARRAY (list) of of multiple-choice questions. "
-            "Each item must follow this format:\n"
-            "{\n"
-            "  \"question\": \"...\",\n"
-            "  \"options\": {\"A\": \"...\", \"B\": \"...\", \"C\": \"...\", \"D\": \"...\"},\n"
-            "  \"correct_answer\": \"A\",\n"
-            "  \"explanation\": \"...\"\n"
-            "}\n"
-            "Do NOT return a single object. Do NOT add any extra text."
+            "Return ONLY a JSON ARRAY of MCQs. Format: "
+            "{\"question\": \"...\", \"options\": {\"A\": \"...\"}, \"correct_answer\": \"A\", \"explanation\": \"...\"}"
         )
 
         all_questions = []
-        previous_questions = set()  # Track question texts to avoid duplicates
+        with Live(Spinner("dots", text=f"Generating questions for [cyan]{topic}[/]...")):
+            data = self.client.generate_json(MODELS["generator"], topic, sys_prompt)
+            if data:
+                all_questions = [Question(**q) for q in data[:num_questions]]
 
-        with Live(Spinner("dots", text=f"Generating {num_questions} questions for [cyan]{topic}[/]..."), refresh_per_second=10):
-            while len(all_questions) < num_questions:
-                if not previous_questions:
-                    # First call, just use the topic
-                    prompt_variation = topic
-                else:
-                    # Ask for a different question than the ones before
-                    prompt_variation = f"{topic}. Ask a different question than before: avoid questions {list(previous_questions)}"
-                                
-                data = self.client.generate_json(MODELS["generator"], prompt_variation, sys_prompt)
-                if not data:
-                    break
-
-                for q in data:
-                    # Only add if question text is new
-
-                    if q["question"] not in previous_questions:
-                        all_questions.append(q)
-                        previous_questions.add(q["question"])
-                    if len(all_questions) >= num_questions:
-                        break
-
-        # Trim to exactly the number requested
-        all_questions = all_questions[:num_questions]
-
-        try:
-            questions = [Question(**q) for q in all_questions]
-        except TypeError as e:
-            self.console.print("[red]Error: Invalid question format from model[/red]")
-            self.console.print(str(e))
-            self.console.print(all_questions)
-            self.console.input("\nPress Enter...")
+        if not all_questions:
+            self.console.print("[red]Failed to generate questions.[/red]")
             return
 
-        session = QuizSession(questions)
+        session = QuizSession(all_questions)
 
         while not session.is_complete():
             q = session.current_question
-            self.show_header(f"Question {session.current_index + 1} of {len(questions)}")
+            self.show_header(f"Question {session.current_index + 1} of {len(all_questions)}")
             
             q_text = f"**{q.question}**\n\n"
             for key, val in q.options.items():
                 q_text += f"* **{key}**: {val}\n"
             
             self.console.print(Panel(Markdown(q_text), title=f"Score: {session.score}", border_style="cyan"))
-            choice = self.console.input("\n[bold]Your Answer (A/B/C/D): [/bold]").upper()
             
+            # --- Explainer integration before answering ---
+            choice = self.console.input("\n[bold]Answer (A/B/C/D) or type 'explain': [/bold]").upper()
+            
+            if choice == 'EXPLAIN':
+                self.enter_explainer_mode(f"Topic: {topic}. Question: {q.question}")
+                continue # Re-show question after explanation
+
             correct = session.process_answer(choice)
             color = "green" if correct else "red"
-            msg = "✅ [bold]Correct![/bold]" if correct else f"❌ [bold]Incorrect![/bold] The answer was {q.correct_answer}."
+            msg = "✅ Correct!" if correct else f"❌ Incorrect! The answer was {q.correct_answer}."
             
             self.console.print(Panel(f"{msg}\n\n[italic]{q.explanation}[/italic]", border_style=color))
-            self.console.input("\n[dim]Press Enter for next question...[/dim]")
+            
+            # --- Explainer integration after answering ---
+            post_action = self.console.input("\n[dim][Enter] Next | [E]xplain further: [/dim]").lower()
+            if post_action == 'e':
+                self.enter_explainer_mode(f"Context: {q.question}. Correct Answer: {q.correct_answer}. Explanation: {q.explanation}")
+            
+            session.next_question()
 
     def run_tutor_mode(self):
         self.show_header("SOCRATIC TUTOR")
-        self.console.print("[dim]The tutor will guide you. Type 'menu' to quit.[/dim]\n")
+        self.console.print("[dim]Type 'explain' to switch to direct explanations or 'menu' to quit.[/dim]\n")
         
-        # This list maintains the memory of the conversation
-        history = [
-            {"role": "system", "content": "You are a Socratic tutor. Never give answers directly. "
-                                          "Instead, ask short, helpful questions to guide the student."}
-        ]
+        history = [{"role": "system", "content": "Socratic tutor. Ask questions, don't give answers."}]
 
         while True:
             user_input = self.console.input("[bold green]You: [/bold green]")
-            if user_input.lower() in ['exit', 'menu']: break
+            if user_input.lower() == 'menu': break
             
-            # 1. Add User input to history
+            if user_input.lower() == 'explain':
+                last_msg = history[-1]["content"] if len(history) > 1 else "the current topic"
+                self.enter_explainer_mode(last_msg)
+                continue
+
             history.append({"role": "user", "content": user_input})
-            
             with Live(Spinner("dots", text="Tutor is thinking...")):
-                # 2. Send the FULL history to the AI
                 response = self.client.chat(MODELS["tutor"], history)
             
-            # 3. Add AI response to history
             history.append({"role": "assistant", "content": response})
-            
             self.console.print(Panel(Markdown(response), title="Tutor", border_style="blue"))
 
     def run_code_mode(self):
@@ -225,7 +209,7 @@ class AITutorApp:
         if not code.strip(): return
 
         history = [
-            {"role": "system", "content": "Explain bugs and concepts in this code for a beginner."},
+            {"role": "system", "content": "Analyze bugs and concepts in this code."},
             {"role": "user", "content": code}
         ]
 
@@ -233,14 +217,20 @@ class AITutorApp:
             result = self.client.chat(MODELS["coder"], history)
         
         self.console.print(Panel(Markdown(result), title="Analysis", border_style="magenta"))
-        self.console.input("\nPress Enter...")
+        
+        while True:
+            action = self.console.input("\n[dim][Enter] Menu | [E]xplain Code deeply: [/dim]").lower()
+            if action == 'e':
+                self.enter_explainer_mode(f"Code Snippet:\n{code}\n\nAnalysis Provided:\n{result}")
+            else:
+                break
 
     def main_menu(self):
         while True:
-            self.show_header("AI TUTOR v4.0")
+            self.show_header("AI TUTOR v5.0")
             menu = Table(show_header=False, box=None)
             menu.add_row("[cyan]1.[/]", "Practice Quiz Mode")
-            menu.add_row("[cyan]2.[/]", "Socratic Tutoring (With Memory)")
+            menu.add_row("[cyan]2.[/]", "Socratic Tutoring")
             menu.add_row("[cyan]3.[/]", "Code Analysis")
             menu.add_row("[red]4.[/]", "Exit")
             self.console.print(menu)
