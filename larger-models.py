@@ -13,7 +13,7 @@ from rich.spinner import Spinner
 from rich.markdown import Markdown
 
 # --- Configuration ---
-GOOGLE_API_KEY = "AIzaSyAysOo7XpBEKRlx1ZerulFwth2QOIpNceg"
+GOOGLE_API_KEY = ""
 genai.configure(api_key=GOOGLE_API_KEY)
 
 # Using Gemini 2.5 Flash for the best speed/free-tier balance
