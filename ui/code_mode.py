@@ -7,6 +7,7 @@ from rich.spinner import Spinner
 from config import MODELS
 from ui.common import console, show_header
 from ui.explainer_mode import enter_explainer_mode
+from core.prompts import CODE_ANALYZER_PROMPT
 
 
 def run_code_mode(client):
@@ -18,7 +19,7 @@ def run_code_mode(client):
         return
 
     history = [
-        {"role": "system", "content": "Analyze bugs and concepts in this code."},
+        {"role": "system", "content": CODE_ANALYZER_PROMPT},
         {"role": "user", "content": code}
     ]
 

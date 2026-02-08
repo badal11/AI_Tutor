@@ -6,13 +6,13 @@ from rich.spinner import Spinner
 from config import MODELS
 from ui.common import console, show_header
 from ui.explainer_mode import enter_explainer_mode
-
+from core.prompts import TUTOR_SYSTEM_PROMPT
 
 def run_tutor_mode(client):
     show_header("SOCRATIC TUTOR")
     console.print("[dim]Type 'explain' to switch to direct explanations or 'menu' to quit.[/dim]\n")
 
-    history = [{"role": "system", "content": "Socratic tutor. Ask questions, don't give answers."}]
+    history = [{"role": "system", "content": TUTOR_SYSTEM_PROMPT }]
 
     while True:
         user_input = console.input("[bold green]You: [/bold green]")
