@@ -1,4 +1,5 @@
 from services.ollama_client import OllamaClient
+from services.gemini_client import GeminiClient
 from services.progress_manager import ProgressManager
 from ui.menu import main_menu
 from ui.quiz_mode import run_quiz_mode
@@ -7,7 +8,8 @@ from ui.code_mode import run_code_mode
 from ui.explainer_mode import enter_explainer_mode
 
 def main():
-    client = OllamaClient()
+    # client = OllamaClient()
+    client = GeminiClient()
     progress = ProgressManager()
 
     while True:
