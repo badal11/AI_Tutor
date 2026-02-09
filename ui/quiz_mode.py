@@ -8,7 +8,6 @@ from domain.models import Question
 from domain.quiz_session import QuizSession
 from ui.common import console, show_header
 from ui.explainer_mode import enter_explainer_mode
-from core.prompts import quiz_system_prompt, map_level_to_difficulty
 from core.prompts import quiz_system_prompt, verification_prompt
 
 
@@ -16,9 +15,8 @@ def run_quiz_mode(client, progress):
     show_header("PRACTICE QUIZ GENERATOR")
     topic = console.input("[bold yellow]What topic do you want to practice? [/bold yellow]")
 
-    stats = progress.get_topic_stats(topic)
-    current_level = stats["level"]
-    console.print(f"[dim]Current Proficiency Level for {topic}: {current_level}/10[/dim]")
+    # Default level since progress checking is skipped
+    current_level = 5
 
     while True:
         try:
@@ -34,16 +32,13 @@ def run_quiz_mode(client, progress):
 
     with Live(Spinner("dots", text=f"Generating {num_questions} questions..."), refresh_per_second=10):
         while len(all_questions) < num_questions:
-            # Prompt variation for diversity
             if not previous_questions:
                 prompt_variation = topic
             else:
                 prompt_variation = f"{topic}. Ask a different question than: {list(previous_questions)[-3:]}"
 
-            # System prompt with descriptive difficulty
             sys_prompt = quiz_system_prompt(topic, current_level)
 
-            # Generate question(s)
             data = client.generate_json(MODELS["generator"], prompt_variation, sys_prompt)
             if not data:
                 break
@@ -56,7 +51,7 @@ def run_quiz_mode(client, progress):
                 verification = client.generate_json(MODELS["explainer"], "", verif_prompt)
                 if verification and isinstance(verification, list) and "correct_answer" in verification[0]:
                     q["correct_answer"] = verification[0]["correct_answer"]
-                # Add to quiz
+                
                 all_questions.append(q)
                 previous_questions.add(q["question"])
 
@@ -65,14 +60,12 @@ def run_quiz_mode(client, progress):
 
     all_questions = all_questions[:num_questions]
 
-    # Convert JSON to Question objects
     try:
         questions = [Question(**q) for q in all_questions]
     except TypeError:
         console.print("[red]Error: Invalid question format from model[/red]")
         return
 
-    # --- Quiz session ---
     session = QuizSession(questions)
 
     while not session.is_complete():
@@ -85,7 +78,7 @@ def run_quiz_mode(client, progress):
 
         console.print(
             Panel(Markdown(q_text),
-                  title=f"Score: {session.score} | Level: {current_level}",
+                  title=f"Score: {session.score}",
                   border_style="cyan")
         )
 
@@ -96,7 +89,7 @@ def run_quiz_mode(client, progress):
             continue
 
         correct = session.process_answer(choice)
-        progress.update_progress(topic, correct)
+        # progress.update_progress removed here
 
         color = "green" if correct else "red"
         msg = "✅ [bold]Correct![/bold]" if correct else f"❌ [bold]Incorrect![/bold] The answer was {q.correct_answer}."
