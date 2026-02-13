@@ -42,4 +42,4 @@ autolabel(rects2)
 
 # Save the figure
 plt.tight_layout()
-plt.savefig('latency_comparison.png')
+plt.savefig('evaluations/latency_comparison.png')

@@ -74,5 +74,5 @@ create_radar_chart(code_cats, code_sllm, code_gemini, "Code Analyzer\n(Qwen-2.5:
 plt.tight_layout()
 
 # Save the plot
-plt.savefig('sllm_vs_gemini_radar_comparison.png', dpi=300)
+plt.savefig('evaluations/sllm_vs_gemini_radar_comparison.png', dpi=300)
 print("Chart saved as 'sllm_vs_gemini_radar_comparison.png'")
