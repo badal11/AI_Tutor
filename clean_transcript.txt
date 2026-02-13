@@ -1,0 +1,107 @@
+--- LLM TUTOR EVALUATION DATASET ---
+
+### Interaction 1
+STUDENT: N/A
+TUTOR: N/A
+------------------------------
+
+### Interaction 2
+STUDENT: N/A
+TUTOR: N/A
+------------------------------
+
+### Interaction 3
+STUDENT: N/A
+TUTOR: N/A
+------------------------------
+
+### Interaction 4
+STUDENT: N/A
+TUTOR: N/A
+------------------------------
+
+### Interaction 5
+STUDENT: N/A
+TUTOR: N/A
+------------------------------
+
+### Interaction 6
+STUDENT: N/A
+TUTOR: N/A
+------------------------------
+
+### Interaction 7
+STUDENT: N/A
+TUTOR: N/A
+------------------------------
+
+### Interaction 8
+STUDENT: N/A
+TUTOR: N/A
+------------------------------
+
+### Interaction 9
+STUDENT: N/A
+TUTOR: N/A
+------------------------------
+
+### Interaction 10
+STUDENT: N/A
+TUTOR: N/A
+------------------------------
+
+### Interaction 11
+STUDENT: N/A
+TUTOR: N/A
+------------------------------
+
+### Interaction 12
+STUDENT: N/A
+TUTOR: N/A
+------------------------------
+
+### Interaction 13
+STUDENT: N/A
+TUTOR: N/A
+------------------------------
+
+### Interaction 14
+STUDENT: N/A
+TUTOR: N/A
+------------------------------
+
+### Interaction 15
+STUDENT: N/A
+TUTOR: N/A
+------------------------------
+
+### Interaction 16
+STUDENT: N/A
+TUTOR: N/A
+------------------------------
+
+### Interaction 17
+STUDENT: N/A
+TUTOR: N/A
+------------------------------
+
+### Interaction 18
+STUDENT: N/A
+TUTOR: N/A
+------------------------------
+
+### Interaction 19
+STUDENT: N/A
+TUTOR: N/A
+------------------------------
+
+### Interaction 20
+STUDENT: N/A
+TUTOR: N/A
+------------------------------
+
+### Interaction 21
+STUDENT: N/A
+TUTOR: N/A
+------------------------------
+
